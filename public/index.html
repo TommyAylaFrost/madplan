@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Madplan</title>
+<style>
+  :root{
+    --pine:#1F3D2E; --pine-deep:#132920; --cream:#F6F1E3; --paper:#FBF8F0;
+    --chili:#C1442D; --butter:#F2C14E; --ink:#221F1B;
+  }
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--cream); color:var(--ink); font-family:system-ui,sans-serif;
+    min-height:100vh; display:flex; align-items:center; justify-content:center;
+  }
+  main{max-width:480px; padding:40px; text-align:center;}
+  .eyebrow{
+    font-family:monospace; font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--chili); font-weight:700; margin-bottom:10px;
+  }
+  h1{font-size:34px; margin:0 0 14px; color:var(--pine-deep);}
+  p{font-size:14.5px; line-height:1.6; color:rgba(34,31,27,0.7);}
+  .badge{
+    display:inline-block; margin-top:20px; padding:6px 14px; border-radius:20px;
+    background:rgba(31,61,46,0.08); border:1px solid rgba(31,61,46,0.2);
+    font-family:monospace; font-size:12px; color:var(--pine);
+  }
+  #status{color:var(--pine); font-weight:600;}
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Fase 0 · Scaffold</div>
+  <h1>Madplan er live</h1>
+  <p>Dette er det tomme udgangspunkt — næste skridt er ugeplan, lager med udløbsdato og en delt indkøbsliste. Hvis du kan se denne side, virker GitHub → Cloudflare Pages-forbindelsen, domænet og (forhåbentlig) Access-login.</p>
+  <div class="badge">API-status: <span id="status">tjekker…</span></div>
+</main>
+<script>
+  fetch('/api/health')
+    .then(r => r.json())
+    .then(d => document.getElementById('status').textContent = d.status === 'ok' ? 'kører ✓' : 'ukendt')
+    .catch(() => document.getElementById('status').textContent = 'ikke tilgængelig');
+</script>
+</body>
+</html>
