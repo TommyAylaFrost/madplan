@@ -5,7 +5,7 @@ import { handle } from 'hono/cloudflare-pages';
 const app = new Hono().basePath('/api');
 
 // ---------- Health ----------
-app.get('/health', (c) => c.json({ status: 'ok', app: 'madplan', phase: 1 }));
+app.get('/health', (c) => c.json({ status: 'ok', app: 'madplan', phase: 2 }));
 
 // ---------- Ugeplan (meals) ----------
 app.get('/meals', async (c) => {
@@ -37,7 +37,7 @@ const VALID_CATEGORIES = ['koeleskab', 'fryser', 'kolonial'];
 
 app.get('/stock', async (c) => {
   const { results } = await c.env.DB.prepare(
-    'SELECT * FROM stock_items ORDER BY added_at DESC'
+    'SELECT * FROM stock_items ORDER BY (expiry_date IS NULL), expiry_date ASC, added_at DESC'
   ).all();
   return c.json(results);
 });
@@ -48,12 +48,46 @@ app.post('/stock', async (c) => {
   if (!name || !VALID_CATEGORIES.includes(category)) {
     return c.json({ error: 'name og gyldig category er påkrævet' }, 400);
   }
+  if (expiry_date && !/^\d{4}-\d{2}-\d{2}$/.test(expiry_date)) {
+    return c.json({ error: 'expiry_date skal være i formatet YYYY-MM-DD' }, 400);
+  }
   const { results } = await c.env.DB.prepare(
     `INSERT INTO stock_items (name, category, expiry_date, added_by)
      VALUES (?, ?, ?, ?) RETURNING *`
   )
     .bind(name, category, expiry_date || null, added_by || null)
     .all();
+  return c.json(results[0]);
+});
+
+// Fase 2: opdatér udløbsdato (eller navn) på en eksisterende vare —
+// bruges når man glemte datoen ved oprettelse, eller vil rette den.
+app.patch('/stock/:id', async (c) => {
+  const id = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const { expiry_date, name } = body;
+
+  if (expiry_date !== undefined && expiry_date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(expiry_date)) {
+    return c.json({ error: 'expiry_date skal være i formatet YYYY-MM-DD eller null' }, 400);
+  }
+
+  const fields = [];
+  const values = [];
+  if (expiry_date !== undefined) { fields.push('expiry_date = ?'); values.push(expiry_date); }
+  if (name !== undefined && name !== '') { fields.push('name = ?'); values.push(name); }
+
+  if (fields.length === 0) {
+    return c.json({ error: 'intet at opdatere — send expiry_date og/eller name' }, 400);
+  }
+
+  values.push(id);
+  const { results } = await c.env.DB.prepare(
+    `UPDATE stock_items SET ${fields.join(', ')} WHERE id = ? RETURNING *`
+  )
+    .bind(...values)
+    .all();
+
+  if (results.length === 0) return c.json({ error: 'vare ikke fundet' }, 404);
   return c.json(results[0]);
 });
 

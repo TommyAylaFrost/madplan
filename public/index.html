@@ -12,6 +12,7 @@
     --pine:#1F3D2E; --pine-deep:#132920; --cream:#F6F1E3; --paper:#FBF8F0;
     --chili:#C1442D; --fjord:#3C5A76; --herb:#5E7A4E; --butter:#F2C14E;
     --ink:#221F1B; --sage:#B9C6AC; --line: rgba(34,31,27,0.12);
+    --amber:#C97E1B; --red:#B23B2E;
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
@@ -29,9 +30,14 @@
   .sharenote{display:flex; gap:10px; align-items:flex-start; background:rgba(60,90,118,0.08); border:1px solid rgba(60,90,118,0.22); border-radius:6px; padding:11px 14px; margin-bottom:26px; font-size:12.5px; line-height:1.55; color:var(--fjord);}
   .sharenote b{color:var(--pine-deep);}
 
+  .expirebanner{display:flex; gap:10px; align-items:flex-start; background:rgba(178,59,46,0.08); border:1px solid rgba(178,59,46,0.28); border-radius:6px; padding:11px 14px; margin-bottom:20px; font-size:12.5px; line-height:1.6; color:var(--red);}
+  .expirebanner b{color:var(--red);}
+  .expirebanner ul{margin:4px 0 0; padding-left:18px;}
+
   .tabs{display:flex; gap:6px; margin-bottom:24px;}
-  .tabbtn{font-family:'JetBrains Mono',monospace; font-size:12.5px; letter-spacing:.04em; text-transform:uppercase; font-weight:700; padding:10px 18px; border-radius:5px 5px 0 0; border:1px solid var(--line); border-bottom:none; background:rgba(34,31,27,0.03); color:rgba(34,31,27,0.55); cursor:pointer;}
+  .tabbtn{font-family:'JetBrains Mono',monospace; font-size:12.5px; letter-spacing:.04em; text-transform:uppercase; font-weight:700; padding:10px 18px; border-radius:5px 5px 0 0; border:1px solid var(--line); border-bottom:none; background:rgba(34,31,27,0.03); color:rgba(34,31,27,0.55); cursor:pointer; position:relative;}
   .tabbtn.active{background:var(--paper); color:var(--pine-deep); border-color:var(--ink); position:relative; top:1px;}
+  .tabbtn .dot{display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--red); margin-left:6px; vertical-align:middle;}
   .tabpanel{display:none;}
   .tabpanel.active{display:block;}
 
@@ -65,6 +71,7 @@
   .chip{font-size:11px; padding:3px 8px; border-radius:3px; background:rgba(34,31,27,0.05); border:1px solid var(--line); color:rgba(34,31,27,0.7);}
   .chip.sale{background:rgba(242,193,78,0.28); border-color:rgba(242,193,78,0.6); color:#5c4711; font-weight:600;}
   .chip.have{background:rgba(94,122,78,0.18); border-color:rgba(94,122,78,0.4); color:#3a4d30; font-weight:600;}
+  .chip.have.urgent{background:rgba(178,59,46,0.16); border-color:rgba(178,59,46,0.4); color:var(--red);}
 
   .tag-price{position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; width:64px; height:64px; background:var(--butter); border-radius:50%; font-family:'JetBrains Mono',monospace; color:#4a3a0d; flex:none; box-shadow:0 2px 0 rgba(0,0,0,0.08) inset;}
   .tag-price .num{font-size:19px; font-weight:700; line-height:1;}
@@ -83,7 +90,8 @@
   .item.done .iname{text-decoration:line-through; opacity:0.4;}
   .item .price{font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--butter); font-weight:700; flex:none;}
   .item .havebadge{font-size:10px; font-family:'JetBrains Mono',monospace; background:rgba(185,198,172,0.25); color:var(--sage); padding:2px 6px; border-radius:8px; flex:none;}
-  .havesection{opacity:0.55;}
+  .item .havebadge.urgent{background:rgba(178,59,46,0.28); color:#ffb4a8;}
+  .havesection{opacity:0.7;}
   .havesection h4{color:rgba(185,198,172,0.7);}
   .empty{font-size:13px; color:rgba(246,241,227,0.5); padding:20px 0; text-align:center;}
   .totalrow{display:flex; justify-content:space-between; align-items:baseline; margin-top:6px; padding-top:14px; border-top:2px solid rgba(246,241,227,0.2);}
@@ -97,14 +105,28 @@
   .stockcol{background:var(--paper); border:1px solid var(--line); border-radius:6px; padding:18px;}
   .stockcol h3{font-family:'Fraunces',serif; font-size:18px; margin:0 0 3px; color:var(--pine-deep); display:flex; align-items:center; gap:8px;}
   .stockcol .stockdesc{font-size:11.5px; color:rgba(34,31,27,0.5); margin-bottom:14px; line-height:1.4;}
-  .addrow{display:flex; gap:6px; margin-bottom:14px;}
-  .addrow input{flex:1; border:1px solid var(--line); border-radius:4px; padding:8px 10px; font-family:'Inter',sans-serif; font-size:13px; background:#fff;}
+  .addrow{display:flex; flex-direction:column; gap:6px; margin-bottom:14px; background:rgba(34,31,27,0.03); border-radius:6px; padding:10px;}
+  .addrow-fields{display:flex; gap:6px;}
+  .addrow input[type=text]{flex:1; border:1px solid var(--line); border-radius:4px; padding:8px 10px; font-family:'Inter',sans-serif; font-size:13px; background:#fff;}
+  .addrow input[type=date]{border:1px solid var(--line); border-radius:4px; padding:7px 8px; font-family:'JetBrains Mono',monospace; font-size:11.5px; background:#fff; color:rgba(34,31,27,0.7); width:132px;}
   .addrow input:focus{outline:2px solid var(--pine); outline-offset:1px;}
   .addrow button{background:var(--pine); color:#fff; border:none; border-radius:4px; padding:0 14px; font-size:16px; cursor:pointer; font-weight:700;}
   .addrow button:hover{background:var(--pine-deep);}
+  .addrow-hint{font-size:10.5px; color:rgba(34,31,27,0.4); padding-left:2px;}
   .stocklist{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px;}
   .stocklist li{display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13px; background:rgba(34,31,27,0.03); border-radius:4px; padding:7px 10px;}
-  .stocklist li button{background:none; border:none; color:var(--chili); cursor:pointer; font-size:15px; line-height:1; padding:2px 4px;}
+  .stocklist li.urgent{background:rgba(178,59,46,0.09); border:1px solid rgba(178,59,46,0.25);}
+  .stocklist li.soon{background:rgba(201,126,27,0.09); border:1px solid rgba(201,126,27,0.25);}
+  .itemleft{display:flex; flex-direction:column; gap:2px; flex:1; min-width:0;}
+  .itemleft .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .expirybadge{font-family:'JetBrains Mono',monospace; font-size:10px; padding:1px 0;}
+  .expirybadge.ok{color:rgba(34,31,27,0.4);}
+  .expirybadge.soon{color:var(--amber); font-weight:700;}
+  .expirybadge.urgent{color:var(--red); font-weight:700;}
+  .expirybadge.none{color:rgba(34,31,27,0.3); font-style:italic;}
+  .itemactions{display:flex; align-items:center; gap:4px; flex:none;}
+  .itemactions input[type=date]{border:1px solid var(--line); border-radius:4px; padding:3px 5px; font-family:'JetBrains Mono',monospace; font-size:10.5px; background:#fff; width:118px;}
+  .itemactions button{background:none; border:none; color:var(--chili); cursor:pointer; font-size:15px; line-height:1; padding:2px 4px;}
   .stockempty{font-size:12.5px; color:rgba(34,31,27,0.4); padding:8px 0; font-style:italic;}
   .loading{font-size:13px; color:rgba(34,31,27,0.5); padding:30px 0; text-align:center;}
 </style>
@@ -129,9 +151,11 @@
     <div><b>Delt med familien:</b> alt gemmes i en fælles database — alle der har adgang til jeres domæne (styret via Cloudflare Access) ser og redigerer det samme lager, den samme ugeplan og den samme indkøbsliste.</div>
   </div>
 
-  <div class="tabs">
+  <div id="expireBannerWrap"></div>
+
+  <div class="tabs" id="tabs">
     <button class="tabbtn active" data-tab="plan">Ugeplan</button>
-    <button class="tabbtn" data-tab="stock">Lager</button>
+    <button class="tabbtn" data-tab="stock">Lager<span class="dot" id="stockDot" style="display:none;"></span></button>
   </div>
 
   <div class="tabpanel active" id="tab-plan">
@@ -155,24 +179,45 @@
   </div>
 
   <div class="tabpanel" id="tab-stock">
-    <p class="sub" style="margin-bottom:20px;">Skriv hvad I allerede har derhjemme, så indkøbslisten ikke foreslår det igen. "Kolonial" er de tørre skabsvarer — ris, mel, dåser, krydderier og den slags.</p>
+    <p class="sub" style="margin-bottom:20px;">Skriv hvad I allerede har derhjemme, og tilføj en udløbsdato hvis I kender den — så advarer appen jer, inden noget bliver dårligt. "Kolonial" er de tørre skabsvarer — ris, mel, dåser, krydderier og den slags.</p>
     <div class="stockgrid">
       <div class="stockcol" data-cat="koeleskab">
         <h3>🧊 Køleskab</h3>
         <div class="stockdesc">Mælk, ost, grønt, rester, marinerede ting.</div>
-        <div class="addrow"><input type="text" placeholder="fx. gulerødder" data-add="koeleskab"><button data-add-btn="koeleskab">+</button></div>
+        <div class="addrow">
+          <div class="addrow-fields">
+            <input type="text" placeholder="fx. gulerødder" data-add="koeleskab">
+            <input type="date" data-expiry-input="koeleskab">
+            <button data-add-btn="koeleskab">+</button>
+          </div>
+          <div class="addrow-hint">Udløbsdato er valgfri</div>
+        </div>
         <ul class="stocklist" data-list="koeleskab"></ul>
       </div>
       <div class="stockcol" data-cat="fryser">
         <h3>❄️ Fryser</h3>
         <div class="stockdesc">Kød, fisk, brød, is, frosne grøntsager.</div>
-        <div class="addrow"><input type="text" placeholder="fx. kyllingebryst" data-add="fryser"><button data-add-btn="fryser">+</button></div>
+        <div class="addrow">
+          <div class="addrow-fields">
+            <input type="text" placeholder="fx. kyllingebryst" data-add="fryser">
+            <input type="date" data-expiry-input="fryser">
+            <button data-add-btn="fryser">+</button>
+          </div>
+          <div class="addrow-hint">Udløbsdato er valgfri</div>
+        </div>
         <ul class="stocklist" data-list="fryser"></ul>
       </div>
       <div class="stockcol" data-cat="kolonial">
         <h3>🥫 Kolonial</h3>
         <div class="stockdesc">Ris, mel, dåser, sauce, krydderier — det tørre skab.</div>
-        <div class="addrow"><input type="text" placeholder="fx. ris" data-add="kolonial"><button data-add-btn="kolonial">+</button></div>
+        <div class="addrow">
+          <div class="addrow-fields">
+            <input type="text" placeholder="fx. ris" data-add="kolonial">
+            <input type="date" data-expiry-input="kolonial">
+            <button data-add-btn="kolonial">+</button>
+          </div>
+          <div class="addrow-hint">Udløbsdato er valgfri</div>
+        </div>
         <ul class="stocklist" data-list="kolonial"></ul>
       </div>
     </div>
@@ -187,6 +232,8 @@ const CAT_LABEL = {
   'Bread/Dairy':'Brød & mejeri', 'Basis':'Fra skabet (ikke tilbud)'
 };
 const STOCK_CATS = ['koeleskab','fryser','kolonial'];
+const URGENT_DAYS = 2;   // rød: udløbet eller udløber inden for 2 dage
+const SOON_DAYS = 5;     // gul: udløber inden for 5 dage
 
 let meals = [];
 let checkedItems = new Set();
@@ -235,17 +282,27 @@ async function toggleItem(key){
 
 async function addStockItem(cat){
   const input = document.querySelector(`input[data-add="${cat}"]`);
+  const dateInput = document.querySelector(`input[data-expiry-input="${cat}"]`);
   const val = input.value.trim();
   if(!val) return;
-  const created = await api('/stock', { method:'POST', body: JSON.stringify({ name: val, category: cat }) });
+  const expiry = dateInput.value || null;
+  const created = await api('/stock', { method:'POST', body: JSON.stringify({ name: val, category: cat, expiry_date: expiry }) });
   stock[cat].push(created);
   input.value = '';
+  dateInput.value = '';
   render();
 }
 
 async function removeStockItem(cat, id){
   await api(`/stock/${id}`, { method:'DELETE' });
   stock[cat] = stock[cat].filter(it => it.id !== id);
+  render();
+}
+
+async function updateExpiry(cat, id, newDate){
+  const updated = await api(`/stock/${id}`, { method:'PATCH', body: JSON.stringify({ expiry_date: newDate || null }) });
+  const idx = stock[cat].findIndex(it => it.id === id);
+  if(idx !== -1) stock[cat][idx] = updated;
   render();
 }
 
@@ -259,6 +316,58 @@ function stockMatch(ingredientName){
     }
   }
   return null;
+}
+
+function daysUntil(dateStr){
+  if(!dateStr) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const target = new Date(dateStr + 'T00:00:00');
+  return Math.round((target - today) / 86400000);
+}
+
+function expiryInfo(dateStr){
+  const days = daysUntil(dateStr);
+  if(days === null) return { level:'none', label:'ingen dato', days:null };
+  if(days < 0) return { level:'urgent', label:`udløbet for ${Math.abs(days)} dag${Math.abs(days)===1?'':'e'} siden`, days };
+  if(days === 0) return { level:'urgent', label:'udløber i dag', days };
+  if(days <= URGENT_DAYS) return { level:'urgent', label:`udløber om ${days} dag${days===1?'':'e'}`, days };
+  if(days <= SOON_DAYS) return { level:'soon', label:`udløber om ${days} dage`, days };
+  return { level:'ok', label:new Date(dateStr).toLocaleDateString('da-DK',{day:'numeric',month:'short'}), days };
+}
+
+function allExpiringItems(){
+  const out = [];
+  STOCK_CATS.forEach(cat=>{
+    stock[cat].forEach(it=>{
+      const info = expiryInfo(it.expiry_date);
+      if(info.level==='urgent' || info.level==='soon') out.push({...it, cat, info});
+    });
+  });
+  return out.sort((a,b)=> (a.info.days ?? 999) - (b.info.days ?? 999));
+}
+
+/* ---------------- render: expiry banner ---------------- */
+function renderExpireBanner(){
+  const wrap = document.getElementById('expireBannerWrap');
+  const dot = document.getElementById('stockDot');
+  const urgentAndSoon = allExpiringItems();
+  if(urgentAndSoon.length === 0){
+    wrap.innerHTML = '';
+    dot.style.display = 'none';
+    return;
+  }
+  dot.style.display = 'inline-block';
+  const items = urgentAndSoon.slice(0,6).map(it =>
+    `<li><b>${it.name}</b> — ${it.info.label}</li>`
+  ).join('');
+  const more = urgentAndSoon.length > 6 ? `<li>… og ${urgentAndSoon.length-6} mere, se Lager-fanen</li>` : '';
+  wrap.innerHTML = `
+    <div class="expirebanner">
+      <span>⏰</span>
+      <div><b>Udløber snart:</b> brug disse først, eller læg dem i madplanen.
+        <ul>${items}${more}</ul>
+      </div>
+    </div>`;
 }
 
 /* ---------------- render: plan tab ---------------- */
@@ -289,8 +398,13 @@ function renderDays(){
         <div class="chips">
           ${m.ingredients.map(i=>{
             const have = stockMatch(i.name);
-            const cls = have ? 'have' : (i.sale?'sale':'');
-            const label = have ? ' · på lager' : (i.sale?' · '+i.price:'');
+            if(have){
+              const info = expiryInfo(have.expiry_date);
+              const urgent = info.level==='urgent' || info.level==='soon';
+              return `<span class="chip have ${urgent?'urgent':''}">${i.name} · på lager${info.level!=='none'?' ('+info.label+')':''}</span>`;
+            }
+            const cls = i.sale?'sale':'';
+            const label = i.sale?' · '+i.price:'';
             return `<span class="chip ${cls}">${i.name}${label}</span>`;
           }).join('')}
         </div>
@@ -333,7 +447,7 @@ function renderShopping(){
     const have = stockMatch(item.name);
     if(have){
       if(!haveCat[item.cat]) haveCat[item.cat] = [];
-      haveCat[item.cat].push(item);
+      haveCat[item.cat].push({...item, stockRef:have});
     } else {
       if(!byCat[item.cat]) byCat[item.cat] = [];
       byCat[item.cat].push(item);
@@ -366,7 +480,10 @@ function renderShopping(){
     html += `<div class="cat havesection"><h4>Allerede på lager</h4>`;
     haveCats.forEach(cat=>{
       haveCat[cat].forEach(item=>{
-        html += `<div class="item"><span class="iname">${item.name} <span class="amt">— ${item.amt}</span></span><span class="havebadge">✓ har det</span></div>`;
+        const info = expiryInfo(item.stockRef.expiry_date);
+        const urgent = info.level==='urgent' || info.level==='soon';
+        const badgeLabel = info.level==='none' ? '✓ har det' : `✓ ${info.label}`;
+        html += `<div class="item"><span class="iname">${item.name} <span class="amt">— ${item.amt}</span></span><span class="havebadge ${urgent?'urgent':''}">${badgeLabel}</span></div>`;
       });
     });
     html += `</div>`;
@@ -390,13 +507,28 @@ function renderStock(){
       ul.innerHTML = '<div class="stockempty">Ingenting registreret endnu.</div>';
       return;
     }
-    ul.innerHTML = items.map(it=>`
-      <li><span>${it.name}</span><button data-remove-cat="${cat}" data-remove-id="${it.id}">×</button></li>
-    `).join('');
+    ul.innerHTML = items.map(it=>{
+      const info = expiryInfo(it.expiry_date);
+      const liClass = info.level==='urgent' ? 'urgent' : (info.level==='soon' ? 'soon' : '');
+      return `
+      <li class="${liClass}">
+        <div class="itemleft">
+          <span class="nm">${it.name}</span>
+          <span class="expirybadge ${info.level}">${info.label}</span>
+        </div>
+        <div class="itemactions">
+          <input type="date" value="${it.expiry_date || ''}" data-edit-expiry="${it.id}" data-edit-cat="${cat}">
+          <button data-remove-cat="${cat}" data-remove-id="${it.id}">×</button>
+        </div>
+      </li>`;
+    }).join('');
   });
 
   document.querySelectorAll('[data-remove-id]').forEach(btn=>{
     btn.addEventListener('click', ()=> removeStockItem(btn.dataset.removeCat, parseInt(btn.dataset.removeId,10)));
+  });
+  document.querySelectorAll('[data-edit-expiry]').forEach(inp=>{
+    inp.addEventListener('change', ()=> updateExpiry(inp.dataset.editCat, parseInt(inp.dataset.editExpiry,10), inp.value));
   });
 }
 
@@ -421,6 +553,7 @@ function render(){
   renderDays();
   renderShopping();
   renderStock();
+  renderExpireBanner();
 }
 
 loadAll();
