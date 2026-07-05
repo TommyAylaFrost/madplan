@@ -1,0 +1,12 @@
+name = "madplan"
+compatibility_date = "2026-07-01"
+pages_build_output_dir = "public"
+
+# Fase 2 tilføjer en D1-database til lager/ugeplan/indkøbsliste.
+# Når den er oprettet (wrangler d1 create madplan-db), aktivér denne blok
+# og indsæt database_id herunder:
+#
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "madplan-db"
+# database_id = "<indsæt-id-her>"
