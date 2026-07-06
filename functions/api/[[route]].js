@@ -5,7 +5,7 @@ import { handle } from 'hono/cloudflare-pages';
 const app = new Hono().basePath('/api');
 
 // ---------- Health ----------
-app.get('/health', (c) => c.json({ status: 'ok', app: 'madplan', phase: 3 }));
+app.get('/health', (c) => c.json({ status: 'ok', app: 'madplan', phase: '3b' }));
 
 // ---------- Ugeplan (meals) ----------
 app.get('/meals', async (c) => {
@@ -128,17 +128,14 @@ app.post('/shopping/toggle', async (c) => {
   return c.json({ item_key, checked: true });
 });
 
-// ---------- Forslag (suggestion_batches / suggestions) — Fase 3 ----------
+// ---------- Forslag (suggestion_batches / suggestions) ----------
 const DOW_NAMES = ['Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag', 'Søndag'];
 const MEAL_IDS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
-// Regner Monday..Sunday(indkøbsdag) ud fra kataloget's valid_from (som er en
-// søndag), i dansk lokal tid — samme logik som brugt til at bygge Fase 1's
-// hardcodede uge, bare dynamisk nu.
 function computeDayLabels(validFromISO) {
   const base = new Date(validFromISO);
   const baseLocalDateStr = base.toLocaleDateString('en-CA', { timeZone: 'Europe/Copenhagen' }); // YYYY-MM-DD
-  const baseLocal = new Date(baseLocalDateStr + 'T12:00:00'); // middag, undgår DST-kant-tilfælde
+  const baseLocal = new Date(baseLocalDateStr + 'T12:00:00');
   const labels = [];
   for (let i = 1; i <= 7; i++) {
     const d = new Date(baseLocal);
@@ -149,52 +146,33 @@ function computeDayLabels(validFromISO) {
   return labels; // index 0 = mandag ... index 6 = søndag (indkøbsdag)
 }
 
-app.get('/suggestions/latest', async (c) => {
-  const batch = await c.env.DB.prepare(
-    `SELECT * FROM suggestion_batches ORDER BY created_at DESC LIMIT 1`
-  ).first();
-  if (!batch) return c.json({ batch: null, suggestions: [] });
-
-  if (batch.status !== 'pending_review') {
-    return c.json({ batch, suggestions: [] });
-  }
-
-  const { results } = await c.env.DB.prepare(
-    `SELECT * FROM suggestions WHERE batch_id = ? ORDER BY perishability_rank ASC`
-  ).bind(batch.id).all();
-  const suggestions = results.map((s) => ({ ...s, ingredients: JSON.parse(s.ingredients_json) }));
-  return c.json({ batch, suggestions });
-});
-
-app.post('/suggestions/:batchId/apply', async (c) => {
-  const batchId = c.req.param('batchId');
-  const body = await c.req.json().catch(() => ({}));
-  const assignments = body.assignments; // [{suggestion_id, day_order}] — præcis 7, day_order 1-7 unikke
-
+function validateAssignments(assignments) {
   if (!Array.isArray(assignments) || assignments.length !== 7) {
-    return c.json({ error: 'assignments skal indeholde præcis 7 {suggestion_id, day_order}' }, 400);
+    return 'assignments skal indeholde præcis 7 {suggestion_id, day_order}';
   }
   const dayOrders = assignments.map((a) => a.day_order).slice().sort((a, b) => a - b);
   if (JSON.stringify(dayOrders) !== JSON.stringify([1, 2, 3, 4, 5, 6, 7])) {
-    return c.json({ error: 'day_order skal dække 1-7 præcis én gang hver' }, 400);
+    return 'day_order skal dække 1-7 præcis én gang hver';
   }
+  return null;
+}
 
-  const batch = await c.env.DB.prepare('SELECT * FROM suggestion_batches WHERE id = ?').bind(batchId).first();
-  if (!batch) return c.json({ error: 'batch ikke fundet' }, 404);
-
+// Fælles skrive-logik: lægger 7 forslag ind i den AKTIVE ugeplan (meals-tabellen)
+// og nulstiller den afkrydsede indkøbsliste. Bruges både af "anvend nu" og
+// af "forfrem staged uge til aktiv".
+async function writeAssignmentsToMeals(env, batch, rows) {
   const labels = computeDayLabels(batch.valid_from);
-
-  for (const a of assignments) {
-    const sug = await c.env.DB.prepare(
+  for (const row of rows) {
+    const sug = await env.DB.prepare(
       'SELECT * FROM suggestions WHERE id = ? AND batch_id = ?'
-    ).bind(a.suggestion_id, batchId).first();
-    if (!sug) return c.json({ error: `forslag ${a.suggestion_id} ikke fundet i denne batch` }, 400);
+    ).bind(row.suggestion_id, batch.id).first();
+    if (!sug) throw new Error(`forslag ${row.suggestion_id} ikke fundet i batch ${batch.id}`);
 
-    const idx = a.day_order - 1;
+    const idx = row.day_order - 1;
     const mealId = MEAL_IDS[idx];
     const label = labels[idx];
 
-    await c.env.DB.prepare(
+    await env.DB.prepare(
       `INSERT INTO meals (id, day_order, dow, date_label, cuisine, diet, title, blurb, kid_tip, price, price_unit, ingredients_json, selected)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
        ON CONFLICT(id) DO UPDATE SET
@@ -204,24 +182,152 @@ app.post('/suggestions/:batchId/apply', async (c) => {
          ingredients_json=excluded.ingredients_json, selected=1`
     )
       .bind(
-        mealId, a.day_order, label.dow, label.date_label,
+        mealId, row.day_order, label.dow, label.date_label,
         sug.cuisine, sug.diet, sug.title, sug.blurb, sug.kid_tip,
         sug.price, sug.price_unit, sug.ingredients_json
       )
       .run();
   }
+  await env.DB.prepare('DELETE FROM shopping_checked').run();
+}
 
-  // Ny uge anvendt → gammel afkrydset indkøbsliste er ikke relevant længere.
-  await c.env.DB.prepare('DELETE FROM shopping_checked').run();
+// Nyeste batch der venter på gennemsyn ELLER er fejlet — driver "Forslag"-fanen og bannere.
+app.get('/suggestions/latest', async (c) => {
+  const batch = await c.env.DB.prepare(
+    `SELECT * FROM suggestion_batches WHERE status IN ('pending_review','failed') ORDER BY created_at DESC LIMIT 1`
+  ).first();
+  if (!batch) return c.json({ batch: null, suggestions: [] });
+
+  if (batch.status === 'failed') return c.json({ batch, suggestions: [] });
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT * FROM suggestions WHERE batch_id = ? ORDER BY perishability_rank ASC`
+  ).bind(batch.id).all();
+  const suggestions = results.map((s) => ({ ...s, ingredients: JSON.parse(s.ingredients_json) }));
+  return c.json({ batch, suggestions });
+});
+
+// Nyeste batch der er "staged" (bygget, men ikke gjort aktiv endnu) — driver
+// "næste uge er klar"-bannereret, uafhængigt af om der ALSO er en ny batch
+// til gennemsyn.
+app.get('/staged/latest', async (c) => {
+  const batch = await c.env.DB.prepare(
+    `SELECT * FROM suggestion_batches WHERE status = 'staged' ORDER BY created_at DESC LIMIT 1`
+  ).first();
+  if (!batch) return c.json({ batch: null, assignments: [] });
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT sa.day_order, s.* FROM staged_assignments sa
+     JOIN suggestions s ON s.id = sa.suggestion_id
+     WHERE sa.batch_id = ? ORDER BY sa.day_order ASC`
+  ).bind(batch.id).all();
+  const assignments = results.map((r) => ({ ...r, ingredients: JSON.parse(r.ingredients_json) }));
+  return c.json({ batch, assignments });
+});
+
+// Anvend med det samme — overskriver den AKTIVE uge (samme opførsel som hele
+// vejen igennem Fase 3, uændret). Bruges når "omstændigheder ændrer sig" og
+// I vil justere ugen der allerede kører.
+app.post('/suggestions/:batchId/apply', async (c) => {
+  const batchId = c.req.param('batchId');
+  const body = await c.req.json().catch(() => ({}));
+  const err = validateAssignments(body.assignments);
+  if (err) return c.json({ error: err }, 400);
+
+  const batch = await c.env.DB.prepare('SELECT * FROM suggestion_batches WHERE id = ?').bind(batchId).first();
+  if (!batch) return c.json({ error: 'batch ikke fundet' }, 404);
+
+  await writeAssignmentsToMeals(c.env, batch, body.assignments);
   await c.env.DB.prepare(`UPDATE suggestion_batches SET status = 'applied' WHERE id = ?`).bind(batchId).run();
-
   return c.json({ ok: true });
 });
 
+// Gem til senere — rører IKKE den aktive uge. Bruges til at forberede næste
+// uge, mens denne uge stadig kører.
+app.post('/suggestions/:batchId/stage', async (c) => {
+  const batchId = c.req.param('batchId');
+  const body = await c.req.json().catch(() => ({}));
+  const err = validateAssignments(body.assignments);
+  if (err) return c.json({ error: err }, 400);
+
+  const batch = await c.env.DB.prepare('SELECT * FROM suggestion_batches WHERE id = ?').bind(batchId).first();
+  if (!batch) return c.json({ error: 'batch ikke fundet' }, 404);
+
+  for (const a of body.assignments) {
+    const sug = await c.env.DB.prepare(
+      'SELECT id FROM suggestions WHERE id = ? AND batch_id = ?'
+    ).bind(a.suggestion_id, batchId).first();
+    if (!sug) return c.json({ error: `forslag ${a.suggestion_id} ikke fundet i denne batch` }, 400);
+
+    await c.env.DB.prepare(
+      `INSERT INTO staged_assignments (batch_id, suggestion_id, day_order) VALUES (?, ?, ?)`
+    ).bind(batchId, a.suggestion_id, a.day_order).run();
+  }
+
+  await c.env.DB.prepare(`UPDATE suggestion_batches SET status = 'staged' WHERE id = ?`).bind(batchId).run();
+  return c.json({ ok: true });
+});
+
+// Forfrem en staged uge til at være den aktive ugeplan — det tidspunkt hvor
+// I rent faktisk skifter over, fx søndag morgen efter storhandlen.
+app.post('/staged/:batchId/promote', async (c) => {
+  const batchId = c.req.param('batchId');
+  const batch = await c.env.DB.prepare(
+    `SELECT * FROM suggestion_batches WHERE id = ? AND status = 'staged'`
+  ).bind(batchId).first();
+  if (!batch) return c.json({ error: 'ingen staged batch med dette id' }, 404);
+
+  const { results: rows } = await c.env.DB.prepare(
+    `SELECT suggestion_id, day_order FROM staged_assignments WHERE batch_id = ?`
+  ).bind(batchId).all();
+  if (rows.length !== 7) {
+    return c.json({ error: `forventede 7 staged assignments, fandt ${rows.length}` }, 500);
+  }
+
+  await writeAssignmentsToMeals(c.env, batch, rows);
+  await c.env.DB.prepare(`UPDATE suggestion_batches SET status = 'applied' WHERE id = ?`).bind(batchId).run();
+  return c.json({ ok: true });
+});
+
+// Forkast — virker uanset status (pending_review, staged, eller failed).
 app.post('/suggestions/:batchId/discard', async (c) => {
   const batchId = c.req.param('batchId');
   await c.env.DB.prepare(`UPDATE suggestion_batches SET status = 'discarded' WHERE id = ?`).bind(batchId).run();
   return c.json({ ok: true });
+});
+
+// Manuel scan-knap i UI'en. Kalder madplan-cron-workeren server-side, så
+// TRIGGER_SECRET aldrig sendes til eller ligger i browseren. Kræver
+// CRON_WORKER_URL og CRON_TRIGGER_SECRET sat op som miljøvariabler/secrets
+// på dette Pages-projekt (se README).
+app.post('/scan/trigger', async (c) => {
+  if (!c.env.CRON_WORKER_URL || !c.env.CRON_TRIGGER_SECRET) {
+    return c.json(
+      { error: 'CRON_WORKER_URL og/eller CRON_TRIGGER_SECRET er ikke konfigureret på dette Pages-projekt endnu' },
+      500
+    );
+  }
+
+  const existing = await c.env.DB.prepare(
+    `SELECT id FROM suggestion_batches WHERE status = 'pending_review' LIMIT 1`
+  ).first();
+  if (existing) {
+    return c.json(
+      { error: 'Der er allerede forslag klar til gennemsyn — se dem færdig eller forkast dem, før I scanner igen' },
+      409
+    );
+  }
+
+  const res = await fetch(`${c.env.CRON_WORKER_URL}/trigger`, {
+    method: 'POST',
+    headers: { 'x-trigger-secret': c.env.CRON_TRIGGER_SECRET },
+  });
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { raw: text }; }
+
+  if (!res.ok) return c.json({ error: 'Scanning fejlede', detail: data }, 502);
+  return c.json(data);
 });
 
 export const onRequest = handle(app);
