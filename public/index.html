@@ -83,6 +83,7 @@
   .pill.asian{background:rgba(193,68,45,0.13); color:var(--chili);}
   .pill.veg{background:rgba(94,122,78,0.16); color:var(--herb);}
   .pill.fish{background:rgba(60,90,118,0.14); color:var(--fjord);}
+  .pill.meat{background:rgba(34,31,27,0.08); color:rgba(34,31,27,0.55);}
   .kidtip{font-size:11.5px; color:rgba(34,31,27,0.5);}
   .body h3{font-family:'Fraunces',serif; font-size:19px; font-weight:600; margin:2px 0 4px; color:var(--ink);}
   .body p.blurb{margin:0 0 8px; font-size:13.2px; line-height:1.5; color:rgba(34,31,27,0.75);}
@@ -96,6 +97,26 @@
   .tag-price .num{font-size:19px; font-weight:700; line-height:1;}
   .tag-price .kr{font-size:9px; letter-spacing:.05em;}
   .tag-price .from{position:absolute; top:-9px; font-size:8px; background:var(--chili); color:#fff; padding:1px 5px; border-radius:8px;}
+
+  .cardactions{margin-left:auto; display:flex; gap:6px;}
+  .miniaction{font-family:'Inter',sans-serif; font-size:10.5px; font-weight:600; padding:4px 9px; border-radius:4px; border:1px solid var(--line); background:#fff; color:rgba(34,31,27,0.6); cursor:pointer;}
+  .miniaction:hover{border-color:var(--pine); color:var(--pine);}
+  .miniaction.danger:hover{border-color:var(--chili); color:var(--chili);}
+
+  .card.emptycard{border-style:dashed; background:rgba(34,31,27,0.02); cursor:default;}
+  .card.emptycard:hover{box-shadow:none; transform:none;}
+  .emptylabel{font-size:13.5px; color:rgba(34,31,27,0.5); font-style:italic; margin:0 0 4px;}
+  .favquickpick{margin-top:10px;}
+  .favquicklabel{font-size:11px; color:rgba(34,31,27,0.5); margin-bottom:6px;}
+  .favquicklist{display:flex; flex-wrap:wrap; gap:6px;}
+  .favchip{cursor:pointer; background:rgba(94,122,78,0.1); border-color:rgba(94,122,78,0.35);}
+  .favchip:hover{background:rgba(94,122,78,0.2);}
+  .swaploading{font-size:12px; color:rgba(34,31,27,0.5); margin-top:10px; font-style:italic;}
+  .swaperror{font-size:12px; color:var(--red); margin-top:10px;}
+  .swapoptions{display:flex; flex-direction:column; gap:10px; margin-top:14px;}
+  .swapopt{background:#fff; border:1px solid var(--line); border-radius:5px; padding:12px;}
+  .swaptitle{font-family:'Fraunces',serif; font-size:15px; font-weight:600; margin:4px 0;}
+  .swapopt p{font-size:12px; color:rgba(34,31,27,0.7); line-height:1.4; margin:0 0 8px;}
 
   .panel{position:sticky; top:24px; background:var(--pine-deep); color:var(--cream); border-radius:6px; padding:22px 22px 20px; min-height:200px;}
   .panel h2{font-family:'Fraunces',serif; font-size:22px; font-weight:600; margin:0 0 4px; color:#fff;}
@@ -214,6 +235,7 @@
       <button class="tabbtn active" data-tab="plan">Ugeplan</button>
       <button class="tabbtn" data-tab="stock">Lager<span class="dot" id="stockDot" style="display:none;"></span></button>
       <button class="tabbtn" data-tab="suggest" id="suggestTabBtn" style="display:none;">Forslag<span class="dot green"></span></button>
+      <button class="tabbtn" data-tab="favorites">Favoritter</button>
     </div>
     <div class="scanrow">
       <button class="btn ghost" id="scanNowBtn">🔍 Søg efter nye forslag</button>
@@ -290,6 +312,11 @@
     <div id="suggestContent"></div>
   </div>
 
+  <div class="tabpanel" id="tab-favorites">
+    <p class="sub" style="margin-bottom:20px;">Retter I har gemt, fordi de var en succes derhjemme. Brug dem til at fylde en tom dag i Ugeplan.</p>
+    <div class="suggestgrid" id="favoritesGrid"></div>
+  </div>
+
 </div>
 
 <script>
@@ -315,6 +342,10 @@ let orderList = [];            // array af suggestion-objekter i den rækkefølg
 let stagedBatch = null;        // en anden batch, klar men IKKE aktiv endnu (bygget til kommende uge)
 let stagedAssignments = [];    // de 7 {day_order, ...suggestion-felter} for den staged uge
 
+let favorites = [];             // gemte favoritretter
+let swapOptionsByDay = {};      // { mealId: [3 forslag] } — midlertidige, ikke gemt i DB
+let swapLoadingDay = null;      // mealId der lige nu venter på Claude-svar, eller null
+
 /* ---------------- API helpers ---------------- */
 async function api(path, opts) {
   const res = await fetch('/api' + path, {
@@ -327,12 +358,13 @@ async function api(path, opts) {
 
 async function loadAll(){
   try{
-    const [mealsRes, shoppingRes, stockRes, suggestRes, stagedRes] = await Promise.all([
+    const [mealsRes, shoppingRes, stockRes, suggestRes, stagedRes, favoritesRes] = await Promise.all([
       api('/meals'),
       api('/shopping'),
       api('/stock'),
       api('/suggestions/latest'),
       api('/staged/latest'),
+      api('/favorites'),
     ]);
     meals = mealsRes;
     checkedItems = new Set(shoppingRes);
@@ -347,6 +379,8 @@ async function loadAll(){
 
     stagedBatch = stagedRes.batch;
     stagedAssignments = stagedRes.assignments || [];
+
+    favorites = favoritesRes;
 
     render();
   }catch(e){
@@ -366,6 +400,46 @@ async function toggleItem(key){
   await api('/shopping/toggle', { method:'POST', body: JSON.stringify({ item_key: key }) });
   if(checkedItems.has(key)) checkedItems.delete(key); else checkedItems.add(key);
   render();
+}
+
+async function clearMeal(id, event){
+  event.stopPropagation();
+  if(!confirm('Fjern retten for denne dag?')) return;
+  await api(`/meals/${id}/clear`, { method:'POST' });
+  await loadAll();
+}
+
+async function fillMeal(id, mealData){
+  await api(`/meals/${id}/fill`, { method:'POST', body: JSON.stringify(mealData) });
+  delete swapOptionsByDay[id];
+  await loadAll();
+}
+
+async function saveFavorite(mealData, event){
+  if(event) event.stopPropagation();
+  const result = await api('/favorites', { method:'POST', body: JSON.stringify(mealData) });
+  if(result.alreadySaved){
+    alert(`"${mealData.title}" er allerede gemt som favorit.`);
+  }
+  await loadAll();
+}
+
+async function removeFavorite(id){
+  await api(`/favorites/${id}`, { method:'DELETE' });
+  await loadAll();
+}
+
+async function requestSwapOptions(dayId){
+  swapLoadingDay = dayId;
+  renderDays();
+  try{
+    const res = await api(`/meals/${dayId}/swap-suggestions`, { method:'POST' });
+    swapOptionsByDay[dayId] = res.options;
+  }catch(e){
+    swapOptionsByDay[dayId] = { error: e.message };
+  }
+  swapLoadingDay = null;
+  renderDays();
 }
 
 async function addStockItem(cat){
@@ -525,6 +599,9 @@ function renderDays(){
   if(meals.length===0){ el.innerHTML = '<div class="loading">Henter ugeplan…</div>'; return; }
 
   el.innerHTML = meals.map(m => {
+    if(m.is_empty){
+      return renderEmptyDayCard(m);
+    }
     const on = m.selected;
     const dietPill = m.diet==='veg' ? '<span class="pill veg">Vegetarisk</span>' : (m.diet==='fish' ? '<span class="pill fish">Fisk</span>' : '');
     return `
@@ -541,6 +618,10 @@ function renderDays(){
           <span class="pill ${m.cuisine}">${m.cuisine==='nordic'?'Nordisk':'Asiatisk'}</span>
           ${dietPill}
           <span class="kidtip">${m.kid_tip}</span>
+          <span class="cardactions">
+            <button class="miniaction" data-fav="${m.id}" title="Gem som favorit">★ Gem</button>
+            <button class="miniaction danger" data-clear="${m.id}" title="Fjern retten for i dag">✕ Fjern</button>
+          </span>
         </div>
         <h3>${m.title}</h3>
         <p class="blurb">${m.blurb}</p>
@@ -566,10 +647,87 @@ function renderDays(){
     </div>`;
   }).join('');
 
-  el.querySelectorAll('.card').forEach(c=>{
+  el.querySelectorAll('.card[data-id]').forEach(c=>{
     const m = meals.find(m=>m.id===c.dataset.id);
+    if(!m || m.is_empty) return;
     c.addEventListener('click', ()=> toggleDay(c.dataset.id, m.selected));
   });
+  el.querySelectorAll('[data-fav]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      const m = meals.find(m=>m.id===btn.dataset.fav);
+      saveFavorite({ title:m.title, cuisine:m.cuisine, diet:m.diet, blurb:m.blurb, kid_tip:m.kid_tip, price:m.price, price_unit:m.price_unit, ingredients:m.ingredients }, e);
+    });
+  });
+  el.querySelectorAll('[data-clear]').forEach(btn=>{
+    btn.addEventListener('click', (e)=> clearMeal(btn.dataset.clear, e));
+  });
+  el.querySelectorAll('[data-fill-fav]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const fav = favorites.find(f=>f.id === parseInt(btn.dataset.fillFav,10));
+      if(fav) fillMeal(btn.dataset.day, { title:fav.title, cuisine:fav.cuisine, diet:fav.diet, blurb:fav.blurb, kid_tip:fav.kid_tip, price:fav.price, price_unit:fav.price_unit, ingredients:fav.ingredients });
+    });
+  });
+  el.querySelectorAll('[data-ask-swap]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{ e.stopPropagation(); requestSwapOptions(btn.dataset.askSwap); });
+  });
+  el.querySelectorAll('[data-fill-swap]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const dayId = btn.dataset.day;
+      const opt = (swapOptionsByDay[dayId] || [])[parseInt(btn.dataset.fillSwap,10)];
+      if(opt) fillMeal(dayId, { title:opt.title, cuisine:opt.cuisine, diet:opt.diet, blurb:opt.blurb, kid_tip:opt.kidTip, ingredients:opt.ingredients });
+    });
+  });
+}
+
+function renderEmptyDayCard(m){
+  const isLoading = swapLoadingDay === m.id;
+  const swapResult = swapOptionsByDay[m.id];
+
+  let swapHtml = '';
+  if(isLoading){
+    swapHtml = `<div class="swaploading">Spørger Claude om alternativer til ${m.dow.toLowerCase()}… (10-20 sek.)</div>`;
+  } else if(swapResult && swapResult.error){
+    swapHtml = `<div class="swaperror">Kunne ikke hente forslag: ${swapResult.error}</div>`;
+  } else if(swapResult){
+    swapHtml = `<div class="swapoptions">
+      ${swapResult.map((opt, idx) => `
+        <div class="swapopt">
+          <div class="tagrow">
+            <span class="pill ${opt.cuisine}">${opt.cuisine==='nordic'?'Nordisk':'Asiatisk'}</span>
+            <span class="pill ${opt.diet==='veg'?'veg':(opt.diet==='fish'?'fish':'meat')}">${opt.diet==='veg'?'Vegetarisk':(opt.diet==='fish'?'Fisk':'Kød')}</span>
+          </div>
+          <div class="swaptitle">${opt.title}</div>
+          <p>${opt.blurb}</p>
+          <button class="btn primary" data-fill-swap="${idx}" data-day="${m.id}">Brug denne</button>
+        </div>
+      `).join('')}
+    </div>`;
+  }
+
+  const favHtml = favorites.length ? `
+    <div class="favquickpick">
+      <div class="favquicklabel">Eller vælg en gemt favorit:</div>
+      <div class="favquicklist">
+        ${favorites.map(f => `<button class="chip favchip" data-fill-fav="${f.id}" data-day="${m.id}">${f.title}</button>`).join('')}
+      </div>
+    </div>` : '';
+
+  return `
+    <div class="card emptycard" data-id="${m.id}">
+      <div class="daycol">
+        <span class="dow">${m.dow}</span>
+        <span class="ddate">${m.date_label}</span>
+      </div>
+      <div class="body">
+        <p class="emptylabel">Ingen ret valgt for i dag endnu.</p>
+        ${favHtml}
+        <button class="btn ghost" data-ask-swap="${m.id}" ${isLoading?'disabled':''} style="margin-top:10px;">🎲 Bed om 3 forslag til ${m.dow.toLowerCase()}</button>
+        ${swapHtml}
+      </div>
+      <div></div>
+    </div>`;
 }
 
 function renderShopping(){
@@ -861,6 +1019,33 @@ async function scanNow(){
 }
 document.getElementById('scanNowBtn').addEventListener('click', scanNow);
 
+function renderFavorites(){
+  const grid = document.getElementById('favoritesGrid');
+  if(favorites.length === 0){
+    grid.innerHTML = '<div class="empty" style="color:rgba(34,31,27,0.5);">Ingen favoritter gemt endnu — klik "★ Gem" på en ret i Ugeplan.</div>';
+    return;
+  }
+  grid.innerHTML = favorites.map(f => {
+    const dietPill = f.diet==='veg' ? '<span class="pill veg">Vegetarisk</span>' : (f.diet==='fish' ? '<span class="pill fish">Fisk</span>' : '');
+    return `
+    <div class="scard">
+      <div class="stop">
+        <div class="tagrow">
+          <span class="pill ${f.cuisine}">${f.cuisine==='nordic'?'Nordisk':'Asiatisk'}</span>
+          ${dietPill}
+        </div>
+        <button class="miniaction danger" data-remove-fav="${f.id}">✕</button>
+      </div>
+      <h4>${f.title}</h4>
+      <p>${f.blurb}</p>
+    </div>`;
+  }).join('');
+
+  grid.querySelectorAll('[data-remove-fav]').forEach(btn=>{
+    btn.addEventListener('click', ()=> removeFavorite(parseInt(btn.dataset.removeFav,10)));
+  });
+}
+
 function render(){
   renderDays();
   renderShopping();
@@ -869,6 +1054,7 @@ function render(){
   renderSuggestBanner();
   renderStagedBanner();
   renderSuggestContent();
+  renderFavorites();
 }
 
 loadAll();

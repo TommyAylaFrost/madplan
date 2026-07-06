@@ -15,6 +15,7 @@ app.get('/meals', async (c) => {
   const meals = results.map((m) => ({
     ...m,
     selected: !!m.selected,
+    is_empty: !!m.is_empty,
     ingredients: JSON.parse(m.ingredients_json),
   }));
   return c.json(meals);
@@ -30,6 +31,136 @@ app.patch('/meals/:id', async (c) => {
     .bind(body.selected ? 1 : 0, id)
     .run();
   return c.json({ ok: true });
+});
+
+// Tømmer en enkelt dags ret — dagen findes stadig (mandag er stadig mandag),
+// men har ingen ret tilknyttet, indtil I fylder den igen.
+app.post('/meals/:id/clear', async (c) => {
+  const id = c.req.param('id');
+  await c.env.DB.prepare(
+    `UPDATE meals SET is_empty = 1, selected = 0 WHERE id = ?`
+  ).bind(id).run();
+  return c.json({ ok: true });
+});
+
+// Fylder en tom dag med enten en favorit eller et af swap-forslagene.
+// Body: { title, cuisine, diet, blurb, kid_tip, price, price_unit, ingredients }
+app.post('/meals/:id/fill', async (c) => {
+  const id = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const { title, cuisine, diet, blurb, kid_tip, price, price_unit, ingredients } = body;
+  if (!title || !cuisine || !diet) {
+    return c.json({ error: 'title, cuisine og diet er påkrævet' }, 400);
+  }
+  await c.env.DB.prepare(
+    `UPDATE meals SET
+       title = ?, cuisine = ?, diet = ?, blurb = ?, kid_tip = ?,
+       price = ?, price_unit = ?, ingredients_json = ?,
+       is_empty = 0, selected = 1
+     WHERE id = ?`
+  )
+    .bind(
+      title, cuisine, diet, blurb || '', kid_tip || '',
+      price ?? null, price_unit || null, JSON.stringify(ingredients || []),
+      id
+    )
+    .run();
+  return c.json({ ok: true });
+});
+
+// Beder Claude om 3 alternative retter til ÉN bestemt dag — ikke en hel uge.
+// Kører direkte fra Pages (kræver ANTHROPIC_API_KEY sat som secret her),
+// uafhængigt af den ugentlige Tjek-scanning i madplan-cron.
+const SWAP_TOOL = {
+  name: 'foreslaa_alternativer',
+  description: 'Foreslår 3 alternative middagsretter til én bestemt dag.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      options: {
+        type: 'array',
+        minItems: 3,
+        maxItems: 3,
+        items: {
+          type: 'object',
+          properties: {
+            cuisine: { type: 'string', enum: ['nordic', 'asian'] },
+            diet: { type: 'string', enum: ['veg', 'fish', 'meat'] },
+            title: { type: 'string' },
+            blurb: { type: 'string' },
+            kidTip: { type: 'string' },
+            ingredients: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  amt: { type: 'string' },
+                  cat: { type: 'string', enum: ['Protein', 'Grønt', 'Sauce/Pantry', 'Bread/Dairy', 'Basis'] },
+                },
+                required: ['name', 'amt', 'cat'],
+              },
+            },
+          },
+          required: ['cuisine', 'diet', 'title', 'blurb', 'kidTip', 'ingredients'],
+        },
+      },
+    },
+    required: ['options'],
+  },
+};
+
+app.post('/meals/:id/swap-suggestions', async (c) => {
+  if (!c.env.ANTHROPIC_API_KEY) {
+    return c.json({ error: 'ANTHROPIC_API_KEY er ikke sat op på dette Pages-projekt' }, 500);
+  }
+  const dayId = c.req.param('id');
+
+  const { results: allMeals } = await c.env.DB.prepare('SELECT * FROM meals ORDER BY day_order').all();
+  const thisDay = allMeals.find((m) => m.id === dayId);
+  if (!thisDay) return c.json({ error: 'dag ikke fundet' }, 404);
+
+  const restOfWeek = allMeals
+    .filter((m) => m.id !== dayId && !m.is_empty)
+    .map((m) => `${m.dow}: ${m.title} (${m.cuisine}, ${m.diet})`)
+    .join('\n');
+
+  const prompt = `Du er en dansk madplanlægger for en familie på 2 voksne og 2 børn (2 og 4 år).
+
+Resten af ugen ser sådan ud:
+${restOfWeek || '(ingen andre dage planlagt endnu)'}
+
+Foreslå 3 forskellige alternative middagsretter til ${thisDay.dow} (${thisDay.date_label}),
+som IKKE gentager de cuisiner/diæter der allerede er rigeligt af i resten af ugen ovenfor.
+Bland gerne nordisk og asiatisk-inspireret. Retterne skal være milde/børnevenlige, eller
+have en tydelig kidTip. Ingredienser behøver ikke være tilbudsvarer — antag almindelige
+dagligvarer. Brug værktøjet "foreslaa_alternativer" til at aflevere svaret.`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': c.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: c.env.CLAUDE_MODEL || 'claude-sonnet-5',
+      max_tokens: 2000,
+      tools: [SWAP_TOOL],
+      tool_choice: { type: 'tool', name: 'foreslaa_alternativer' },
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (!res.ok) {
+    return c.json({ error: `Anthropic API-kald fejlede: ${res.status} ${await res.text()}` }, 502);
+  }
+  const data = await res.json();
+  const toolUse = data.content.find((b) => b.type === 'tool_use' && b.name === 'foreslaa_alternativer');
+  if (!toolUse) {
+    return c.json({ error: 'Claude returnerede ikke det forventede værktøjskald' }, 502);
+  }
+  return c.json({ options: toolUse.input.options });
 });
 
 // ---------- Lager (stock_items) ----------
@@ -328,6 +459,39 @@ app.post('/scan/trigger', async (c) => {
 
   if (!res.ok) return c.json({ error: 'Scanning fejlede', detail: data }, 502);
   return c.json(data);
+});
+
+// ---------- Favoritter ----------
+app.get('/favorites', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    'SELECT * FROM favorites ORDER BY saved_at DESC'
+  ).all();
+  return c.json(results.map((f) => ({ ...f, ingredients: JSON.parse(f.ingredients_json) })));
+});
+
+app.post('/favorites', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const { title, cuisine, diet, blurb, kid_tip, price, price_unit, ingredients } = body;
+  if (!title || !cuisine || !diet) {
+    return c.json({ error: 'title, cuisine og diet er påkrævet' }, 400);
+  }
+  // Undgå oplagte dubletter — samme titel er allerede gemt.
+  const existing = await c.env.DB.prepare('SELECT id FROM favorites WHERE title = ?').bind(title).first();
+  if (existing) return c.json({ alreadySaved: true, id: existing.id });
+
+  const { results } = await c.env.DB.prepare(
+    `INSERT INTO favorites (title, cuisine, diet, blurb, kid_tip, price, price_unit, ingredients_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
+  )
+    .bind(title, cuisine, diet, blurb || '', kid_tip || '', price ?? null, price_unit || null, JSON.stringify(ingredients || []))
+    .all();
+  return c.json(results[0]);
+});
+
+app.delete('/favorites/:id', async (c) => {
+  const id = c.req.param('id');
+  await c.env.DB.prepare('DELETE FROM favorites WHERE id = ?').bind(id).run();
+  return c.json({ ok: true });
 });
 
 export const onRequest = handle(app);
