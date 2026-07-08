@@ -461,6 +461,36 @@ app.post('/scan/trigger', async (c) => {
   return c.json(data);
 });
 
+// ---------- Stregkode-hukommelse (Fase 6) ----------
+// Lokal cache af barcode → varenavn/kategori. Tjekkes FØR Open Food Facts,
+// og opdateres hver gang en scannet vare rent faktisk bliver tilføjet til
+// lageret — uanset om navnet kom fra Open Food Facts eller blev skrevet
+// manuelt. Over tid lærer denne tabel jeres husholdnings egne varer,
+// inklusiv REMA 1000's private label-produkter som Open Food Facts ikke kender.
+app.get('/barcode/:code', async (c) => {
+  const code = c.req.param('code');
+  const row = await c.env.DB.prepare(
+    'SELECT name, category FROM barcode_overrides WHERE barcode = ?'
+  ).bind(code).first();
+  if (!row) return c.json({ found: false });
+  return c.json({ found: true, name: row.name, category: row.category });
+});
+
+app.post('/barcode', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const { barcode, name, category } = body;
+  if (!barcode || !name) {
+    return c.json({ error: 'barcode og name er påkrævet' }, 400);
+  }
+  await c.env.DB.prepare(
+    `INSERT INTO barcode_overrides (barcode, name, category, updated_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(barcode) DO UPDATE SET
+       name = excluded.name, category = excluded.category, updated_at = excluded.updated_at`
+  ).bind(barcode, name, category || null).run();
+  return c.json({ ok: true });
+});
+
 // ---------- Favoritter ----------
 app.get('/favorites', async (c) => {
   const { results } = await c.env.DB.prepare(

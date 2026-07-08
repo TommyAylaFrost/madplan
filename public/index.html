@@ -118,6 +118,18 @@
   .swaptitle{font-family:'Fraunces',serif; font-size:15px; font-weight:600; margin:4px 0;}
   .swapopt p{font-size:12px; color:rgba(34,31,27,0.7); line-height:1.4; margin:0 0 8px;}
 
+  .scanoverlay{position:fixed; inset:0; background:rgba(19,41,32,0.85); z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px;}
+  .scanbox{background:var(--paper); border-radius:8px; padding:20px; max-width:420px; width:100%; max-height:90vh; overflow-y:auto;}
+  .scanbox h3{font-family:'Fraunces',serif; font-size:19px; margin:0 0 10px; color:var(--pine-deep);}
+  .scanbox .scanclose{float:right; background:none; border:none; font-size:20px; cursor:pointer; color:rgba(34,31,27,0.5); line-height:1;}
+  #qr-reader{width:100%; border-radius:6px; overflow:hidden; margin-bottom:12px;}
+  .scanstatustext{font-size:12.5px; color:rgba(34,31,27,0.6); text-align:center; margin-bottom:10px; min-height:18px;}
+  .scanconfirm label{display:block; font-size:11.5px; color:rgba(34,31,27,0.55); margin:10px 0 4px;}
+  .scanconfirm input[type=text], .scanconfirm input[type=date], .scanconfirm select{
+    width:100%; border:1px solid var(--line); border-radius:4px; padding:9px 10px; font-family:'Inter',sans-serif; font-size:13.5px; background:#fff;
+  }
+  .scanconfirm .scanbtnrow{display:flex; gap:8px; margin-top:16px;}
+
   .panel{position:sticky; top:24px; background:var(--pine-deep); color:var(--cream); border-radius:6px; padding:22px 22px 20px; min-height:200px;}
   .panel h2{font-family:'Fraunces',serif; font-size:22px; font-weight:600; margin:0 0 4px; color:#fff;}
   .panel .p-sub{font-size:12px; color:rgba(246,241,227,0.55); margin-bottom:16px; line-height:1.5;}
@@ -205,6 +217,7 @@
   .oarrows button:hover{border-color:var(--pine); color:var(--pine);}
   .oarrows button:disabled{opacity:0.25; cursor:not-allowed;}
 </style>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -264,7 +277,8 @@
   </div>
 
   <div class="tabpanel" id="tab-stock">
-    <p class="sub" style="margin-bottom:20px;">Skriv hvad I allerede har derhjemme, og tilføj en udløbsdato hvis I kender den. "Kolonial" er de tørre skabsvarer — ris, mel, dåser, krydderier og den slags.</p>
+    <p class="sub" style="margin-bottom:14px;">Skriv hvad I allerede har derhjemme, og tilføj en udløbsdato hvis I kender den. "Kolonial" er de tørre skabsvarer — ris, mel, dåser, krydderier og den slags.</p>
+    <button class="btn primary" id="scanBarcodeBtn" style="margin-bottom:20px;">📷 Scan stregkode</button>
     <div class="stockgrid">
       <div class="stockcol" data-cat="koeleskab">
         <h3>🧊 Køleskab</h3>
@@ -317,6 +331,8 @@
     <div class="suggestgrid" id="favoritesGrid"></div>
   </div>
 
+  <div id="scanModalWrap"></div>
+
 </div>
 
 <script>
@@ -345,6 +361,14 @@ let stagedAssignments = [];    // de 7 {day_order, ...suggestion-felter} for den
 let favorites = [];             // gemte favoritretter
 let swapOptionsByDay = {};      // { mealId: [3 forslag] } — midlertidige, ikke gemt i DB
 let swapLoadingDay = null;      // mealId der lige nu venter på Claude-svar, eller null
+
+let scanModalOpen = false;
+let scanState = 'scanning';     // 'scanning' | 'looking-up' | 'confirm' | 'error'
+let scanBarcode = null;
+let scanProductName = '';
+let scanProductCategory = null;
+let scanErrorMsg = '';
+let html5QrCodeInstance = null;
 
 /* ---------------- API helpers ---------------- */
 async function api(path, opts) {
@@ -440,6 +464,191 @@ async function requestSwapOptions(dayId){
   }
   swapLoadingDay = null;
   renderDays();
+}
+
+/* ---------------- Stregkode-scanning (Fase 5) ---------------- */
+function openScanModal(){
+  scanModalOpen = true;
+  scanState = 'scanning';
+  scanBarcode = null;
+  scanProductName = '';
+  scanProductCategory = null;
+  scanErrorMsg = '';
+  renderScanModal();
+  // Vent til DOM-elementet faktisk findes, før vi starter kameraet.
+  setTimeout(startCamera, 50);
+}
+
+async function startCamera(){
+  const el = document.getElementById('qr-reader');
+  if(!el || typeof Html5Qrcode === 'undefined'){
+    scanState = 'error';
+    scanErrorMsg = 'Kunne ikke indlæse scanner-biblioteket. Tjek internetforbindelsen og prøv igen.';
+    renderScanModal();
+    return;
+  }
+  html5QrCodeInstance = new Html5Qrcode('qr-reader', { formatsToSupport: [
+    Html5QrcodeSupportedFormats.EAN_13,
+    Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.UPC_A,
+    Html5QrcodeSupportedFormats.UPC_E,
+    Html5QrcodeSupportedFormats.CODE_128,
+  ], verbose: false });
+
+  try{
+    await html5QrCodeInstance.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 260, height: 140 } },
+      onBarcodeDetected,
+      () => { /* løbende "intet fundet endnu" — ignoreres bevidst */ }
+    );
+  }catch(e){
+    scanState = 'error';
+    scanErrorMsg = 'Kunne ikke få adgang til kameraet. Tjek at browseren har tilladelse til kamera for denne side.';
+    renderScanModal();
+  }
+}
+
+async function stopCamera(){
+  if(html5QrCodeInstance){
+    try{ await html5QrCodeInstance.stop(); html5QrCodeInstance.clear(); }catch(e){ /* allerede stoppet */ }
+    html5QrCodeInstance = null;
+  }
+}
+
+async function onBarcodeDetected(decodedText){
+  if(scanState !== 'scanning') return; // undgå dobbelt-hit mens vi allerede slår op
+  scanBarcode = decodedText;
+  scanState = 'looking-up';
+  renderScanModal();
+  await stopCamera();
+
+  // Tjek først vores egen hukommelse — hurtigere, og kender REMA 1000's
+  // private label-varer som Open Food Facts ikke har.
+  try{
+    const local = await api(`/barcode/${decodedText}`);
+    if(local.found){
+      scanProductName = local.name;
+      scanProductCategory = local.category;
+      scanState = 'confirm';
+      renderScanModal();
+      return;
+    }
+  }catch(e){ /* lokalt opslag fejlede stille, falder videre til Open Food Facts */ }
+
+  try{
+    const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${decodedText}.json`);
+    const data = await res.json();
+    if(data.status === 1 && data.product){
+      scanProductName = data.product.product_name_da || data.product.product_name || '';
+    } else {
+      scanProductName = '';
+    }
+  }catch(e){
+    scanProductName = '';
+  }
+  scanProductCategory = null;
+  scanState = 'confirm';
+  renderScanModal();
+}
+
+async function closeScanModal(){
+  await stopCamera();
+  scanModalOpen = false;
+  renderScanModal();
+}
+
+async function confirmScannedItem(){
+  const nameInput = document.getElementById('scanNameInput');
+  const catSelect = document.getElementById('scanCatSelect');
+  const expiryInput = document.getElementById('scanExpiryInput');
+  const name = nameInput.value.trim();
+  if(!name) return;
+  const cat = catSelect.value;
+  const expiry = expiryInput.value || null;
+
+  const created = await api('/stock', { method:'POST', body: JSON.stringify({ name, category: cat, expiry_date: expiry }) });
+  stock[cat].push(created);
+
+  // Husk denne stregkode til næste gang — uanset om navnet kom fra Open
+  // Food Facts, vores egen hukommelse, eller blev skrevet manuelt.
+  if(scanBarcode){
+    try{ await api('/barcode', { method:'POST', body: JSON.stringify({ barcode: scanBarcode, name, category: cat }) }); }
+    catch(e){ /* ikke kritisk hvis dette fejler — varen er stadig tilføjet til lageret */ }
+  }
+
+  await closeScanModal();
+  render();
+}
+
+function renderScanModal(){
+  const wrap = document.getElementById('scanModalWrap');
+  if(!scanModalOpen){ wrap.innerHTML = ''; return; }
+
+  let body = '';
+  if(scanState === 'scanning'){
+    body = `<div id="qr-reader"></div><div class="scanstatustext">Ret kameraet mod stregkoden…</div>`;
+  } else if(scanState === 'looking-up'){
+    body = `<div class="scanstatustext">Fundet: ${scanBarcode} — slår op…</div>`;
+  } else if(scanState === 'error'){
+    body = `<div class="scanstatustext" style="color:var(--red);">${scanErrorMsg}</div>
+      <div class="scanconfirm">
+        <label>Indtast varenavn manuelt</label>
+        <input type="text" id="scanNameInput" placeholder="fx. gulerødder">
+        <label>Kategori</label>
+        <select id="scanCatSelect">
+          <option value="koeleskab">Køleskab</option>
+          <option value="fryser">Fryser</option>
+          <option value="kolonial">Kolonial</option>
+        </select>
+        <label>Udløbsdato (valgfri)</label>
+        <input type="date" id="scanExpiryInput">
+        <div class="scanbtnrow">
+          <button class="btn primary" id="scanConfirmBtn" style="flex:1;">Tilføj til lager</button>
+        </div>
+      </div>`;
+  } else if(scanState === 'confirm'){
+    const foundNote = scanProductCategory
+      ? `Genkendt fra jeres eget lager — I har scannet denne før`
+      : (scanProductName
+        ? `Fundet via Open Food Facts (stregkode ${scanBarcode})`
+        : `Stregkode ${scanBarcode} kendes ikke endnu — indtast navn manuelt, så husker vi den til næste gang`);
+    const catOptions = ['koeleskab','fryser','kolonial'].map(cat=>{
+      const label = cat==='koeleskab'?'Køleskab':(cat==='fryser'?'Fryser':'Kolonial');
+      const sel = scanProductCategory === cat ? 'selected' : '';
+      return `<option value="${cat}" ${sel}>${label}</option>`;
+    }).join('');
+    body = `
+      <div class="scanstatustext">${foundNote}</div>
+      <div class="scanconfirm">
+        <label>Varenavn</label>
+        <input type="text" id="scanNameInput" value="${scanProductName}" placeholder="fx. gulerødder">
+        <label>Kategori</label>
+        <select id="scanCatSelect">${catOptions}</select>
+        <label>Udløbsdato (valgfri)</label>
+        <input type="date" id="scanExpiryInput">
+        <div class="scanbtnrow">
+          <button class="btn ghost" id="scanAgainBtn" style="flex:1;">Scan igen</button>
+          <button class="btn primary" id="scanConfirmBtn" style="flex:1;">Tilføj til lager</button>
+        </div>
+      </div>`;
+  }
+
+  wrap.innerHTML = `
+    <div class="scanoverlay">
+      <div class="scanbox">
+        <button class="scanclose" id="scanCloseBtn">×</button>
+        <h3>📷 Scan stregkode</h3>
+        ${body}
+      </div>
+    </div>`;
+
+  const closeBtn = document.getElementById('scanCloseBtn');
+  if(closeBtn) closeBtn.addEventListener('click', closeScanModal);
+  const confirmBtn = document.getElementById('scanConfirmBtn');
+  if(confirmBtn) confirmBtn.addEventListener('click', confirmScannedItem);
+  const againBtn = document.getElementById('scanAgainBtn');
+  if(againBtn) againBtn.addEventListener('click', openScanModal);
 }
 
 async function addStockItem(cat){
@@ -1056,6 +1265,8 @@ function render(){
   renderSuggestContent();
   renderFavorites();
 }
+
+document.getElementById('scanBarcodeBtn').addEventListener('click', openScanModal);
 
 loadAll();
 </script>
